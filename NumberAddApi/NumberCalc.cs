@@ -1,6 +1,6 @@
 ﻿namespace NumberAddApi
 {
-    public class Todo
+    public class NumberCalc
     {
         public int Id { get; set; }
         public int? FirstNumber { get; set; }

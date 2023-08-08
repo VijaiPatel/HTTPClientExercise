@@ -1,72 +1,92 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using NumberAddApi;
 
+
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddDbContext<TodoDb>(opt => opt.UseInMemoryDatabase("TodoList"));
-builder.Services.AddDatabaseDeveloperPageExceptionFilter();
+//configure services
+builder.Services.AddDbContext<NumberCalcDb>(options => options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 var app = builder.Build();
+//configure HTTP request pipeline
+if(app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+}
 
-var todoItems = app.MapGroup("/todoitems");
+//Map post
+app.MapPost("api/calcs", context =>
+{
+    //deserealise and read the incoming JSON request
+    var request = context.Request.ReadFromJsonAsync<CalcRequest>().Result;
+    //perform the correct calculation based on operator
+    double result =DoCalc(request.Num1, request.Num2, request.Operater);
+    using var scope= app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<NumberCalcDb>();
+    //save the result to the db
+    dbContext.CalcResults.Add(new CalcResult
+    {
+        Num1 = request.Num1, Num2 =request.Num2, Operater =request.Operater, Result= result
+    });
+    dbContext.SaveChanges();
 
-todoItems.MapGet("/", GetAllTodos);
-todoItems.MapGet("/complete", GetCompleteTodos);
-todoItems.MapGet("/{id}", GetTodo);
-todoItems.MapPost("/", CreateTodo);
-todoItems.MapPut("/{id}", UpdateTodo);
-todoItems.MapDelete("/{id}", DeleteTodo);
+    //return the result as a JSON response
+    return context.Response.WriteAsJsonAsync(new {Result=result}); 
+});
+
+app.MapGet("/api/calcs", context =>
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext =scope.ServiceProvider.GetRequiredService<NumberCalcDb>();
+    //Retrieve calc history from db
+    var calcs = dbContext.CalcResults.ToList();
+    //Return the history as a Json Response
+    return context.Response.WriteAsJsonAsync(calcs);
+});
 
 app.Run();
-
-static async Task<IResult> GetAllTodos(TodoDb db)
+//DoCalc function
+double DoCalc(double num1, double num2, string operater)
 {
-    return TypedResults.Ok(await db.Todos.ToArrayAsync());
-}
-
-static async Task<IResult> GetCompleteTodos(TodoDb db)
-{
-    return TypedResults.Ok(await db.Todos.Where(t => t.IsComplete).ToListAsync());
-}
-
-static async Task<IResult> GetTodo(int id, TodoDb db)
-{
-    return await db.Todos.FindAsync(id)
-        is Todo todo
-            ? TypedResults.Ok(todo)
-            : TypedResults.NotFound();
-}
-
-static async Task<IResult> CreateTodo(Todo todo, TodoDb db)
-{
-    db.Todos.Add(todo);
-    await db.SaveChangesAsync();
-
-    return TypedResults.Created($"/todoitems/{todo.Id}", todo);
-}
-
-static async Task<IResult> UpdateTodo(int id, Todo inputTodo, TodoDb db)
-{
-    var todo = await db.Todos.FindAsync(id);
-
-    if (todo is null) return TypedResults.NotFound();
-
-    todo.FirstNumber = inputTodo.FirstNumber;
-    todo.SecondNumber = inputTodo.SecondNumber;
-    todo.Result = inputTodo.Result;
-    todo.IsComplete = inputTodo.IsComplete;
-
-    await db.SaveChangesAsync();
-
-    return TypedResults.NoContent();
-}
-
-static async Task<IResult> DeleteTodo(int id, TodoDb db)
-{
-    if (await db.Todos.FindAsync(id) is Todo todo)
+    switch (operater)
     {
-        db.Todos.Remove(todo);
-        await db.SaveChangesAsync();
-        return TypedResults.Ok(todo);
+        case "+":
+            return num1 + num2;
+        case "-": 
+            return num1 - num2;
+        case "*": 
+            return num1 * num2;
+        case "/":
+            if (num2!=0)
+            {
+                return num1 / num2;
+            }
+            else
+            {
+                throw new ArgumentException("Division by 0 is not possible");
+            }
+        default:
+            throw new ArgumentException("Operator is not valid. Only use +,-,*,/");            
     }
-
-    return TypedResults.NotFound();
+}
+//calcrequest class
+public class CalcRequest
+{
+    public double Num1 { get; set; }
+    public double Num2 { get; set; }
+    public string Operater { get; set; }
+}
+//caclresult class
+public class CalcResult
+{
+    public int Id { get; set; }
+    public double Num1 { get; set; }
+    public double Num2 { get; set; }
+    public string Operater { get; set; }
+    public double Result { get; set; }
 }

@@ -23,6 +23,8 @@ namespace HTTPClientExercise
         {
             var response = await MyhtttpClient.GetAsync("api/todoitems");
             response.EnsureSuccessStatusCode();
+
+            var content = await response.Content.ReadAsStringAsync();
         }
     }
 }
